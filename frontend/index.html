@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask your files</title>
+<meta name="description" content="Upload documents and ask questions. Answers cite the passages they came from.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<style>
+:root{--paper:#edf0f5;--card:#fff;--ink:#15202b;--muted:#5b6877;--line:#d9dfe8;--accent:#2b4eff;--hl:#ffe066;--ok:#1e9e6a;--warn:#c98a00;--bad:#c0392b;
+--ui:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;--read:"Newsreader",Georgia,"Times New Roman",serif;color-scheme:light}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font:16px/1.5 var(--ui);-webkit-font-smoothing:antialiased}
+[hidden]{display:none!important}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.btn{background:var(--ink);color:#fff;border:0;border-radius:10px;padding:.65rem 1.1rem;font-weight:600;cursor:pointer}
+.btn:hover{background:#22344a}.btn:disabled{opacity:.5;cursor:not-allowed}
+.link{background:none;border:0;color:var(--muted);cursor:pointer;text-decoration:underline;padding:0;font-size:.85rem}
+.gate{min-height:100%;display:grid;place-items:center;padding:1.5rem}
+.gate form{width:min(420px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;padding:2rem}
+.gate h1{font:500 2rem/1.1 var(--read);margin:0 0 .5rem}
+.gate p{color:var(--muted);margin:0 0 1.25rem}
+.gate input{width:100%;padding:.7rem .85rem;border:1px solid var(--line);border-radius:10px;margin-bottom:.9rem;background:#fff}
+.gate .btn{width:100%}
+.err{color:var(--bad);font-size:.9rem;margin:.75rem 0 0;min-height:1.2em}
+.shell{display:grid;grid-template-columns:320px 1fr;height:100%}
+.library{background:var(--card);border-right:1px solid var(--line);padding:1.25rem;display:flex;flex-direction:column;gap:1rem;overflow:auto}
+.library>*{min-width:0}
+.brand{font:500 1.5rem/1 var(--read)}
+.engine{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:var(--muted)}
+.dot{width:.55rem;height:.55rem;border-radius:50%;background:var(--muted)}
+.engine[data-state=ready] .dot{background:var(--ok)}
+.engine[data-state=warming] .dot{background:var(--warn);animation:pulse 1.2s ease-in-out infinite}
+.engine[data-state=offline] .dot{background:var(--bad)}
+@keyframes pulse{50%{opacity:.25}}
+.drop{display:block;border:1.5px dashed #aab4c3;border-radius:12px;padding:1rem;cursor:pointer;transition:background .15s,border-color .15s}
+.drop:hover,.drop.over{background:#f4f6fb;border-color:var(--accent)}
+.drop strong{display:block}.drop span{font-size:.82rem;color:var(--muted)}
+#docs{list-style:none;margin:0;padding:0;display:grid;gap:.4rem}
+#docs li{min-width:0;display:flex;align-items:center;gap:.6rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:10px;font-size:.9rem}
+#docs .grow{flex:1;min-width:0;display:grid}
+#docs li.failed{border-color:#e9b9b4;background:#fdf4f3}
+#docs li.failed small{color:var(--bad);white-space:normal}
+#docs li.pending{background:linear-gradient(90deg,#f4f6fb,#fff,#f4f6fb);background-size:200% 100%;animation:sweep 1.4s linear infinite}
+@keyframes sweep{to{background-position:-200% 0}}
+#docs label{flex:1;min-width:0;display:flex;gap:.55rem;align-items:center;cursor:pointer}
+#docs .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#docs small{color:var(--muted);font-size:.78rem}
+#docs .x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:1.1rem;line-height:1;padding:.2rem .35rem;border-radius:6px}
+#docs .x:hover{color:var(--bad);background:#fbeceb}
+#notice{font-size:.85rem;color:var(--bad)}
+#notice:empty{display:none}
+.empty-lib{font-size:.88rem;color:var(--muted)}
+.library .link{margin-top:auto;align-self:flex-start}
+.chat{display:flex;flex-direction:column;min-width:0;height:100%}
+.thread{flex:1;overflow:auto;padding:2rem clamp(1rem,5vw,4rem)}
+.col{max-width:760px;margin:0 auto;display:grid;gap:1.75rem}
+.intro h2{font:500 2.1rem/1.15 var(--read);margin:2rem 0 .6rem}
+.intro p{color:var(--muted);max-width:46ch;margin:0}
+.q{justify-self:end;max-width:85%;background:var(--ink);color:#fff;padding:.7rem 1rem;border-radius:16px 16px 4px 16px;white-space:pre-wrap}
+.a{font:400 1.14rem/1.65 var(--read)}
+.a.wait{color:var(--muted);font-style:italic}
+.a p{margin:0 0 .7rem}.a ul,.a ol{margin:0 0 .7rem;padding-left:1.3rem}.a li{margin:.15rem 0}.a h4{font:600 1rem var(--ui);margin:1rem 0 .4rem}
+.tw{overflow-x:auto;margin:.3rem 0 .9rem}.a table{border-collapse:collapse;font:400 .9rem/1.45 var(--ui);min-width:100%}
+.a th,.a td{border:1px solid var(--line);padding:.45rem .65rem;text-align:left;vertical-align:top}.a th{background:#e3e8f1;font-weight:600}.a td{background:var(--card)}
+.a code{font:.9em ui-monospace,Menlo,monospace;background:#e3e8f1;padding:.1em .35em;border-radius:4px}
+.cite{font:600 .7rem var(--ui);vertical-align:super;line-height:1;background:var(--hl);border:0;border-radius:4px;padding:.2rem .35rem;margin:0 .1rem;cursor:pointer}
+.cite:hover{background:#ffd21f}
+.sources{margin-top:1rem;display:grid;gap:.4rem;font:400 .92rem/1.5 var(--ui)}
+.sources>summary{cursor:pointer;color:var(--muted);font-size:.85rem}
+details.src{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:.5rem .75rem}
+details.src[open]{border-color:var(--accent)}
+details.src summary{cursor:pointer;font-weight:600;font-size:.88rem}
+details.src p{margin:.5rem 0 0;color:#2c3a4a;white-space:pre-wrap}
+mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 .1em}
+.composer{padding:1rem clamp(1rem,5vw,4rem) 1.25rem;background:linear-gradient(transparent,var(--paper) 30%)}
+.composer form{max-width:760px;margin:0 auto;display:flex;gap:.6rem;align-items:flex-end;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:.5rem .5rem .5rem .9rem}
+.composer textarea{flex:1;border:0;resize:none;outline:0;background:none;max-height:9rem;padding:.4rem 0}
+.composer form:focus-within{border-color:var(--accent)}
+@media(max-width:860px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto;min-height:100%}
+.library{border-right:0;border-bottom:1px solid var(--line);max-height:46vh}.chat{height:auto;min-height:70vh}.thread{padding:1.25rem 1rem}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<section class="gate" id="gate" hidden>
+  <form id="gateForm">
+    <h1>Ask your files</h1>
+    <p>Add documents, then ask questions. Every answer points to the passages it came from.</p>
+    <input id="code" type="password" placeholder="Access code" autocomplete="current-password" required aria-label="Access code">
+    <button class="btn" type="submit">Open workspace</button>
+    <p class="err" id="gateErr" role="alert"></p>
+  </form>
+</section>
+
+<div class="shell" id="app" hidden>
+  <aside class="library">
+    <div class="brand">Ask your files</div>
+    <div class="engine" id="engine" data-state="warming" role="status"><span class="dot"></span><span id="engineText">Starting up…</span></div>
+    <label class="drop" id="drop">
+      <input type="file" id="file" multiple hidden accept=".pdf,.docx,.pptx,.xlsx,.xlsm,.csv,.tsv,.html,.htm,.txt,.md,.json,.xml,.png,.jpg,.jpeg,.gif,.webp">
+      <strong>Add files</strong>
+      <span>Drop them here or choose from your device. PDF, Word, PowerPoint, Excel, CSV, web pages, text and images.</span>
+    </label>
+    <div id="notice" role="alert"></div>
+    <ul id="docs" aria-label="Your files"></ul>
+    <p class="empty-lib" id="emptyLib" hidden>No files yet.</p>
+    <button class="link" id="signout" type="button">Use a different access code</button>
+  </aside>
+
+  <main class="chat">
+    <div class="thread" id="thread"><div class="col" id="col">
+      <div class="intro" id="intro"><h2>What do you want to know?</h2><p>Add a file on the left, then ask about it. Untick files to leave them out of an answer.</p></div>
+    </div></div>
+    <div class="composer"><form id="composer">
+      <textarea id="q" rows="1" placeholder="Ask about your files" aria-label="Your question"></textarea>
+      <button class="btn" id="send" type="submit">Ask</button>
+    </form></div>
+  </main>
+</div>
+
+<script>
+const API=(window.RAG_API_URL||"").replace(/\/$/,"");
+const $=s=>document.querySelector(s);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const FRESH=9*60e3;           // Render sleeps after ~15 min; treat the server as warm for 9
+let code=sessionStorage.getItem("code")||"";
+let lastOk=+sessionStorage.getItem("lastOk")||0;
+let warming=null,docs=[],history=[],busy=false;
+
+/* ---------- keeping the server awake ---------- */
+function engine(s){const e=$("#engine");e.dataset.state=s;
+  $("#engineText").textContent={ready:"Ready",warming:"Starting up…",offline:"Can't reach the server"}[s]}
+async function ping(){try{return (await fetch(API+"/health",{cache:"no-store",signal:AbortSignal.timeout(10000)})).ok}catch{return false}}
+function touch(){lastOk=Date.now();sessionStorage.setItem("lastOk",lastOk);engine("ready")}
+function wake(){
+  if(Date.now()-lastOk<FRESH)return Promise.resolve();
+  if(!warming){engine("warming");
+    warming=(async()=>{for(let i=0;i<45;i++){if(await ping()){touch();return}await sleep(Math.min(1500+i*250,5000))}
+      engine("offline");throw new Error("The server isn't responding. Please try again in a minute.")})().finally(()=>{warming=null})}
+  return warming}
+wake().catch(()=>{});                                   // start waking the moment the page opens
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake().catch(()=>{})});
+setInterval(()=>{if(!document.hidden)ping().then(ok=>ok&&touch())},4*60e3);   // stay warm while the tab is open
+
+async function api(path,opt={},retry=true){
+  await wake();
+  let r;
+  try{r=await fetch(API+path,{...opt,headers:{...(opt.headers||{}),Authorization:"Bearer "+code}})}
+  catch(e){if(!retry)throw new Error("Connection lost. Please try again.");lastOk=0;return api(path,opt,false)}
+  if(r.status===401){signOut("That access code wasn't recognised.");throw new Error("Invalid access code.")}
+  if(!r.ok){let m="Something went wrong. Please try again.";try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+  touch();return r}
+
+/* ---------- gate ---------- */
+function show(){const ok=!!code;$("#gate").hidden=ok;$("#app").hidden=!ok;if(ok)loadDocs()}
+function signOut(msg=""){code="";sessionStorage.removeItem("code");docs=[];history=[];$("#gateErr").textContent=msg;show()}
+$("#gateForm").onsubmit=e=>{e.preventDefault();code=$("#code").value.trim();sessionStorage.setItem("code",code);$("#code").value="";$("#gateErr").textContent="";show()};
+$("#signout").onclick=()=>signOut();
+
+/* ---------- files ---------- */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let pollP=null;
+function renderDocs(){
+  $("#docs").innerHTML=docs.map(d=>{
+    const name=`<span class="name" title="${esc(d.filename)}">${esc(d.filename)}</span>`;
+    const del=`<button class="x" data-del="${d.id}" aria-label="Delete ${esc(d.filename)}">×</button>`;
+    if(d.status==="processing")return `<li class="pending"><span class="grow">${name}<small>${esc(d.progress||"Working…")}</small></span>${del}</li>`;
+    if(d.status==="failed")return `<li class="failed"><span class="grow">${name}<small>${esc(d.error||"This file couldn't be read.")}</small></span>${del}</li>`;
+    const sub=`${d.n_chunks} parts`+(d.progress?`. ${esc(d.progress)}`:"");
+    return `<li><label><input type="checkbox" data-id="${d.id}" checked><span class="grow">${name}<small>${sub}</small></span></label>${del}</li>`}).join("");
+  $("#emptyLib").hidden=docs.length>0}
+async function refresh(){try{docs=await (await api("/documents")).json();renderDocs();return true}
+  catch(e){$("#notice").textContent=e.message;return false}}
+// Large or scanned files are read in the background; poll until nothing is still processing.
+function ensurePoll(){
+  if(pollP||!docs.some(d=>d.status==="processing"))return pollP;
+  pollP=(async()=>{try{for(let i=0;i<500&&docs.some(d=>d.status==="processing");i++){await sleep(2500);await refresh()}}
+    finally{pollP=null}})();return pollP}
+async function loadDocs(){await refresh();ensurePoll()}
+async function upload(files){
+  $("#notice").textContent="";
+  for(const f of [...files]){                       // one at a time keeps the free server's memory flat
+    try{const fd=new FormData();fd.append("file",f);
+      const d=await (await api("/documents",{method:"POST",body:fd})).json();
+      docs=[d,...docs];renderDocs();await ensurePoll()}
+    catch(e){$("#notice").textContent=`${f.name}: ${e.message}`}}}
+$("#file").onchange=e=>{upload(e.target.files);e.target.value=""};
+const drop=$("#drop");
+["dragover","dragenter"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",e=>upload(e.dataTransfer.files));
+$("#docs").addEventListener("click",async e=>{const id=e.target.dataset.del;if(!id)return;
+  try{await api("/documents/"+id,{method:"DELETE"});await loadDocs()}catch(err){$("#notice").textContent=err.message}});
+function scope(){const all=[...document.querySelectorAll("#docs input[type=checkbox]")];
+  const on=all.filter(c=>c.checked).map(c=>c.dataset.id);
+  if(all.length&&!on.length)throw new Error("Tick at least one file to search.");
+  return on.length===all.length?null:on}
+
+/* ---------- chat ---------- */
+const inline=t=>t.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/(^|[^*])\*(?=\S)([^*\n]*\S)\*(?!\*)/g,"$1<em>$2</em>").replace(/`([^`]+)`/g,"<code>$1</code>")
+  .replace(/\[(\d{1,2})\]/g,'<button class="cite" type="button" data-n="$1">$1</button>');
+// Small, safe renderer: text is escaped first, then tables, lists, headings and paragraphs are built.
+function md(src){
+  const lines=esc(src.replace(/【(\d{1,2})[^】]*】/g,"[$1]")).split("\n");   // some models cite as 【1†L1-L4】
+  const row=l=>/^\s*\|.*\|\s*$/.test(l||"");
+  let out="",i=0;
+  while(i<lines.length){
+    const l=lines[i];
+    if(row(l)&&row(lines[i+1])&&/^\s*\|?[\s:|-]*-[\s:|-]*$/.test(lines[i+1])){
+      const rows=[];while(i<lines.length&&row(lines[i]))rows.push(lines[i++]);
+      const cells=r=>r.trim().replace(/^\||\|$/g,"").split("|").map(c=>inline(c.trim()));
+      out+=`<div class="tw"><table><thead><tr>${cells(rows[0]).map(c=>`<th>${c}</th>`).join("")}</tr></thead><tbody>${rows.slice(2).map(r=>`<tr>${cells(r).map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;continue}
+    if(/^\s*[-*] /.test(l)){const it=[];while(i<lines.length&&/^\s*[-*] /.test(lines[i]))it.push(lines[i++].replace(/^\s*[-*] /,""));
+      out+="<ul>"+it.map(x=>`<li>${inline(x)}</li>`).join("")+"</ul>";continue}
+    if(/^\s*\d+[.)] /.test(l)){const it=[];while(i<lines.length&&/^\s*\d+[.)] /.test(lines[i]))it.push(lines[i++].replace(/^\s*\d+[.)] /,""));
+      out+="<ol>"+it.map(x=>`<li>${inline(x)}</li>`).join("")+"</ol>";continue}
+    const h=/^#{1,4}\s+(.*)/.exec(l);
+    out+=h?`<h4>${inline(h[1])}</h4>`:(l.trim()?`<p>${inline(l)}</p>`:"");i++}
+  return out}
+function sourcesHTML(list,question){
+  const words=[...new Set((question.toLowerCase().match(/[a-z0-9]{4,}/g)||[]))];
+  const re=words.length?new RegExp("\\b("+words.join("|")+")\\w*","gi"):null;
+  return `<details class="sources"><summary>Passages used (${list.length})</summary>`+list.map(s=>{
+    let t=esc(s.content.slice(0,700)+(s.content.length>700?"…":""));if(re)t=t.replace(re,"<mark>$&</mark>");
+    const where=[s.page?`page ${s.page}`:"",s.section||""].filter(Boolean).join(", ");
+    return `<details class="src" data-n="${s.n}"><summary>${s.n}. ${esc(s.filename)}${where?" – "+esc(where):""}</summary><p>${t}</p></details>`}).join("")+"</details>"}
+$("#col").addEventListener("click",e=>{const n=e.target.dataset?.n;if(!e.target.classList.contains("cite"))return;
+  const box=e.target.closest(".turn").querySelector(".sources");if(!box)return;box.open=true;
+  const d=box.querySelector(`details.src[data-n="${n}"]`);if(d){d.open=true;d.scrollIntoView({block:"nearest",behavior:"smooth"})}});
+const grow=()=>{const q=$("#q");q.style.height="auto";q.style.height=Math.min(q.scrollHeight,144)+"px"};
+$("#q").addEventListener("input",grow);
+$("#q").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("#composer").requestSubmit()}});
+
+$("#composer").onsubmit=async e=>{
+  e.preventDefault();if(busy)return;
+  const q=$("#q").value.trim();if(!q)return;
+  let ids;try{ids=scope()}catch(err){$("#notice").textContent=err.message;return}
+  $("#notice").textContent="";busy=true;$("#send").disabled=true;$("#intro")?.remove();
+  $("#q").value="";grow();
+  const turn=document.createElement("div");turn.className="turn";turn.style.display="grid";turn.style.gap="1rem";
+  turn.innerHTML=`<div class="q">${esc(q)}</div><div><div class="a wait">Looking through your files…</div><div class="src-slot"></div></div>`;
+  $("#col").append(turn);const th=$("#thread");th.scrollTop=th.scrollHeight;
+  const ans=turn.querySelector(".a"),slot=turn.querySelector(".src-slot");
+  const slow=setTimeout(()=>{if(ans.classList.contains("wait"))ans.textContent="Still starting up. The first question after a quiet spell takes a little longer."},6000);
+  let text="";
+  try{
+    const r=await api("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,history:history.slice(-6),doc_ids:ids})});
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf="";
+    for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+      while((i=buf.indexOf("\n\n"))>=0){const raw=buf.slice(0,i);buf=buf.slice(i+2);
+        const ev=/^event: (.*)$/m.exec(raw)?.[1],data=JSON.parse(/^data: (.*)$/m.exec(raw)?.[1]??"null");
+        if(ev==="sources"&&data.length)slot.innerHTML=sourcesHTML(data,q);
+        if(ev==="token"){text+=data;ans.classList.remove("wait");ans.innerHTML=md(text);th.scrollTop=th.scrollHeight}
+        if(ev==="error"){ans.classList.remove("wait");ans.innerHTML=md(text)+`<p class="err">${esc(data)}</p>`}}}
+    if(text){history.push({role:"user",content:q},{role:"assistant",content:text})}
+  }catch(err){ans.classList.remove("wait");ans.innerHTML=`<span class="err">${esc(err.message)}</span>`}
+  clearTimeout(slow);busy=false;$("#send").disabled=false;$("#q").focus()};
+
+show();
+</script>
+</body>
+</html>
