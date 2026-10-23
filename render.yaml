@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: rag-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ACCESS_CODES
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
