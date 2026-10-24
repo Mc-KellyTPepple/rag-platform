@@ -17,6 +17,9 @@ CHUNK_SIZE, OVERLAP = 1100, 150
 MIN_PAGE_CHARS = int(os.getenv("MIN_PAGE_CHARS", "25"))      # fewer characters than this = treat the page as a scan
 MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "30"))        # OCR is slow on a free CPU, so cap it per file
 RERANK_CANDIDATES = 20
+# Questions about the document itself (title, authors, abstract...) are answered by its opening passages,
+# which a similarity search for "title of paper" rarely ranks high.
+DOC_LEVEL = re.compile(r"\b(titled?|authors?|who (wrote|wrote it|authored)|written by|abstract|summar\w*|overview|journal|doi|publisher|published|affiliation|what is (this|the) (paper|document|file|report)|what('s| is) (this|the) (paper|document|file|report) about)\b", re.I)
 
 _embedder = None
 pool = None
@@ -285,6 +288,27 @@ def ping_db():
 
 
 # ---------- hybrid retrieval ----------
+def opening_chunks(ns, doc_ids=None, max_docs=3):
+    """The first passages of up to three files: title, authors and abstract live here."""
+    flt = "and c.document_id = any(%(docs)s::uuid[])" if doc_ids else ""
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select c.document_id, d.filename, c.page, c.section, c.content, 1.0 as score, c.ord
+                from chunks c join documents d on d.id = c.document_id
+                where c.namespace = %(ns)s and c.ord < 2 and d.status = 'ready' {flt}
+                order by d.created_at desc, c.ord""",
+            {"ns": ns, "docs": doc_ids}).fetchall()
+    keep, docs = [], []
+    for r in rows:
+        if r["document_id"] not in docs:
+            if len(docs) == max_docs:
+                continue
+            docs.append(r["document_id"])
+        keep.append({**r, "document_id": str(r["document_id"]), "score": float(r["score"])})
+    for r in keep:
+        r.pop("ord", None)
+    return keep
+
 def search(ns, query, doc_ids=None, k=30, n=8):
     """Dense (pgvector) + keyword (Postgres full text) fused with reciprocal rank fusion, then reranked."""
     cands = RERANK_CANDIDATES if heavy.RERANK_ON else n
@@ -316,4 +340,9 @@ def search(ns, query, doc_ids=None, k=30, n=8):
     with pool.connection() as c:
         rows = c.execute(sql, params).fetchall()
     hits = [{**r, "document_id": str(r["document_id"]), "score": float(r["score"])} for r in rows]
-    return heavy.rerank(query, hits, n)
+    hits = heavy.rerank(query, hits, n)
+    if DOC_LEVEL.search(query):
+        pins = opening_chunks(ns, doc_ids)
+        seen = {(p["document_id"], p["content"][:80]) for p in pins}
+        hits = (pins + [h for h in hits if (h["document_id"], h["content"][:80]) not in seen])[:10]
+    return hits
