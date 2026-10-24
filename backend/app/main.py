@@ -27,6 +27,7 @@ SYSTEM = (
     "Write cite markers only as bracketed numbers like [1], never in any other format. "
     "State only what the sources say. Copy job titles, names and dates exactly as written. "
     "If a source gives only an organization and dates, don't invent a title or duties for it. "
+    "When no title is given, write \"Role not stated\". "
     "If a detail isn't there, say it isn't stated rather than guessing. "
     "Be concise: short paragraphs or bullet points, and a table only if the person asks for one."
 )
