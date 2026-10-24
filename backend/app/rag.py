@@ -17,6 +17,8 @@ CHUNK_SIZE, OVERLAP = 1100, 150
 MIN_PAGE_CHARS = int(os.getenv("MIN_PAGE_CHARS", "25"))      # fewer characters than this = treat the page as a scan
 MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "30"))        # OCR is slow on a free CPU, so cap it per file
 RERANK_CANDIDATES = 20
+# Questions that need many passages (lists, histories, summaries) get 12 instead of 8.
+BROAD = re.compile(r"\b(all|every|list|experience|history|career|summar\w*|overview|roles?|positions?|publications?|projects?|skills?|education|qualifications?)\b", re.I)
 # Questions about the document itself (title, authors, abstract...) are answered by its opening passages,
 # which a similarity search for "title of paper" rarely ranks high.
 DOC_LEVEL = re.compile(r"\b(titled?|authors?|who (wrote|wrote it|authored)|written by|abstract|summar\w*|overview|journal|doi|publisher|published|affiliation|what is (this|the) (paper|document|file|report)|what('s| is) (this|the) (paper|document|file|report) about)\b", re.I)
@@ -311,6 +313,8 @@ def opening_chunks(ns, doc_ids=None, max_docs=3):
 
 def search(ns, query, doc_ids=None, k=30, n=8):
     """Dense (pgvector) + keyword (Postgres full text) fused with reciprocal rank fusion, then reranked."""
+    if BROAD.search(query):
+        n = max(n, 12)
     cands = RERANK_CANDIDATES if heavy.RERANK_ON else n
     qv = next(iter(_embedder.query_embed(query)))
     words = list(dict.fromkeys(w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", query)))[:12]
@@ -344,5 +348,5 @@ def search(ns, query, doc_ids=None, k=30, n=8):
     if DOC_LEVEL.search(query):
         pins = opening_chunks(ns, doc_ids)
         seen = {(p["document_id"], p["content"][:80]) for p in pins}
-        hits = (pins + [h for h in hits if (h["document_id"], h["content"][:80]) not in seen])[:10]
+        hits = (pins + [h for h in hits if (h["document_id"], h["content"][:80]) not in seen])[:max(n, 10)]
     return hits

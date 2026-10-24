@@ -45,10 +45,10 @@ def complete(system, messages, max_tokens=150):
     """Short, non-streaming call (used to rewrite follow-up questions)."""
     if PROVIDER == "groq":
         r = _c["sync"].chat.completions.create(
-            model=FAST_MODEL, max_tokens=max(max_tokens, 600), **_groq_extra(FAST_MODEL),
+            model=FAST_MODEL, max_tokens=max(max_tokens, 600), temperature=0, **_groq_extra(FAST_MODEL),
             messages=[{"role": "system", "content": system}] + messages)
         return (r.choices[0].message.content or "").strip()
-    r = _c["sync"].messages.create(model=FAST_MODEL, max_tokens=max_tokens, system=system, messages=messages)
+    r = _c["sync"].messages.create(model=FAST_MODEL, max_tokens=max_tokens, temperature=0, system=system, messages=messages)
     return r.content[0].text.strip()
 
 
@@ -56,14 +56,14 @@ async def stream(system, messages, max_tokens=1200):
     """Yields the answer text piece by piece."""
     if PROVIDER == "groq":
         s = await _c["async"].chat.completions.create(
-            model=GEN_MODEL, max_tokens=max(max_tokens, 2500), stream=True, **_groq_extra(GEN_MODEL),
+            model=GEN_MODEL, max_tokens=max(max_tokens, 2500), stream=True, temperature=0.2, **_groq_extra(GEN_MODEL),
             messages=[{"role": "system", "content": system}] + messages)
         async for ev in s:
             if ev.choices and ev.choices[0].delta.content:
                 yield ev.choices[0].delta.content
     else:
         async with _c["async"].messages.stream(
-                model=GEN_MODEL, max_tokens=max_tokens, system=system, messages=messages) as s:
+                model=GEN_MODEL, max_tokens=max_tokens, temperature=0.2, system=system, messages=messages) as s:
             async for t in s.text_stream:
                 yield t
 
