@@ -140,6 +140,8 @@ async def chat(body: ChatIn, ns=Depends(auth)):
         hist.pop(0)
     query = await asyncio.to_thread(rewrite, q, hist)
     hits = await asyncio.to_thread(rag.search, ns, query, body.doc_ids)
+    llm.log.info("chat: rewritten=%s hits=%d scoped_files=%s query=%.80r",
+                 query != q, len(hits), len(body.doc_ids) if body.doc_ids else 0, query)
 
     async def gen():
         yield sse("sources", [{"n": i + 1, **h} for i, h in enumerate(hits)])
