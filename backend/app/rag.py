@@ -279,9 +279,13 @@ def search(ns, query, doc_ids=None, k=30, n=8):
     flt = "and document_id = any(%(docs)s::uuid[])" if doc_ids else ""
     sql = f"""
     with sem as (
-      select id, row_number() over (order by embedding <=> %(qv)s) as r
-      from chunks where namespace = %(ns)s {flt}
-      order by embedding <=> %(qv)s limit %(k)s),
+      -- "+ 0" keeps Postgres from using the approximate HNSW index. With a filter on namespace,
+      -- that index can return too few rows (or none) when its nearest candidates belong to other
+      -- workspaces or to deleted files. An exact scan is fast at this size and always finds results.
+      select id, row_number() over (order by d) as r
+      from (select id, (embedding <=> %(qv)s) + 0 as d
+            from chunks where namespace = %(ns)s {flt}
+            order by d limit %(k)s) t),
     lex as (
       select id, row_number() over (order by ts_rank_cd(fts, q) desc) as r
       from chunks, to_tsquery('english', %(tsq)s) q
