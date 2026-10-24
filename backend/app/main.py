@@ -143,10 +143,22 @@ async def chat(body: ChatIn, ns=Depends(auth)):
     llm.log.info("chat: rewritten=%s hits=%d scoped_files=%s query=%.80r",
                  query != q, len(hits), len(body.doc_ids) if body.doc_ids else 0, query)
 
+    empty_msg = None
+    if not hits:
+        st = await asyncio.to_thread(rag.status_counts, ns)
+        if st["ready"] == 0 and st["busy"] > 0:
+            empty_msg = "Your file is still being read, so there's nothing to search yet. Give it a moment, then ask again."
+        elif st["ready"] == 0 and st["failed"] > 0:
+            empty_msg = "Your last upload couldn't be read. Remove it with the × button and add it again."
+        elif st["ready"] == 0:
+            empty_msg = "There are no files in your workspace yet. Add one on the left, then ask."
+        else:
+            empty_msg = "I couldn't find anything relevant in your files. Try rephrasing, or add the file that covers this."
+
     async def gen():
         yield sse("sources", [{"n": i + 1, **h} for i, h in enumerate(hits)])
         if not hits:
-            yield sse("token", "I couldn't find anything relevant in your files. Try rephrasing, or add the file that covers this.")
+            yield sse("token", empty_msg)
             yield sse("done", "")
             return
         ctx = "\n\n".join(

@@ -220,7 +220,12 @@ def process(ns, doc_id, filename, data, describe_image):
         _progress(doc_id, f"Indexing {len(chunks)} parts…")
         # The file name and section go into the embedding so short chunks keep their context.
         texts = [f"{filename} | {sec or ''} | {c}" for c, _, sec in chunks]
-        vecs = list(_embedder.passage_embed(texts, batch_size=32))
+        # Small batches: a big batch of long passages can use hundreds of MB and get the
+        # 512 MB free instance killed. Report progress as each batch finishes.
+        vecs = []
+        for i in range(0, len(texts), 8):
+            vecs.extend(_embedder.passage_embed(texts[i:i + 8], batch_size=8))
+            _progress(doc_id, f"Indexing {min(i + 8, len(texts))} of {len(texts)} parts…")
         with pool.connection() as conn, conn.transaction():
             with conn.cursor() as cur:
                 cur.executemany(
@@ -241,6 +246,15 @@ def reset_stale():
     with pool.connection() as c:
         c.execute("update documents set status='failed', progress=null, "
                   "error='Interrupted by a restart. Please upload the file again.' where status='processing'")
+
+
+def status_counts(ns):
+    with pool.connection() as c:
+        return c.execute(
+            "select count(*) filter (where status='ready') as ready, "
+            "count(*) filter (where status='processing') as busy, "
+            "count(*) filter (where status='failed') as failed "
+            "from documents where namespace=%s", (ns,)).fetchone()
 
 
 def count_processing():
