@@ -168,6 +168,8 @@ async function api(path,opt={},retry=true){
   try{r=await fetch(API+path,{...opt,headers:{...(opt.headers||{}),Authorization:"Bearer "+code}})}
   catch(e){if(!retry)throw new Error("Connection lost. Please try again.");lastOk=0;return api(path,opt,false)}
   if(r.status===401){let m="That access code wasn't recognised.";try{m=(await r.json()).detail||m}catch{}
+    // An older server doesn't know demo workspaces and calls them an invalid code. Say what is really wrong.
+    if(code.startsWith("guest-")&&/invalid/i.test(m))m="The demo isn't available yet because the server is running an older version. Please try again later, or use an access code.";
     signOut(m);throw new Error(m)}
   if(!r.ok){let m="Something went wrong. Please try again.";try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
   touch();return r}
