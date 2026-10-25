@@ -88,7 +88,7 @@ def _rows_to_blocks(rows, section):
     return out
 
 
-def parse(filename, data, describe_image, progress=lambda m: None, notes=None):
+def parse(filename, data, describe_image, progress=lambda m: None, notes=None, max_ocr=None):
     notes = notes if notes is not None else []
     ext = os.path.splitext(filename)[1].lower()
     blocks = []
@@ -98,7 +98,7 @@ def parse(filename, data, describe_image, progress=lambda m: None, notes=None):
         scanned = [i + 1 for i, t in enumerate(texts) if len(t) < MIN_PAGE_CHARS]
         ocr = {}
         if scanned and heavy.OCR_ON:
-            todo = scanned[:MAX_OCR_PAGES]
+            todo = scanned[:max_ocr or MAX_OCR_PAGES]
             ocr = heavy.ocr_pdf_pages(data, todo, lambda k, n: progress(f"Reading scanned page {k + 1} of {n}…"))
             if len(scanned) > len(todo):
                 notes.append(f"Read {len(todo)} of {len(scanned)} scanned pages (limit).")
@@ -213,12 +213,12 @@ def _fail(doc_id, msg):
         c.execute("update documents set status='failed', error=%s, progress=null where id=%s", (msg, doc_id))
 
 
-def process(ns, doc_id, filename, data, describe_image):
+def process(ns, doc_id, filename, data, describe_image, max_ocr=None):
     """Runs in a background worker: parse (with OCR if needed), chunk, embed, store."""
     try:
         notes = []
         _progress(doc_id, "Extracting text…")
-        chunks = chunk(parse(filename, data, describe_image, lambda m: _progress(doc_id, m), notes))
+        chunks = chunk(parse(filename, data, describe_image, lambda m: _progress(doc_id, m), notes, max_ocr))
         if not chunks:
             hint = " This looks like a scan and OCR is switched off." if not heavy.OCR_ON else ""
             raise Unsupported("No readable text found." + hint)
@@ -260,6 +260,18 @@ def status_counts(ns):
             "count(*) filter (where status='processing') as busy, "
             "count(*) filter (where status='failed') as failed "
             "from documents where namespace=%s", (ns,)).fetchone()
+
+
+def purge_guests(hours):
+    """Deletes demo workspaces (namespace starts with g_) older than the retention period."""
+    with pool.connection() as c:
+        c.execute("delete from documents where left(namespace, 2) = 'g_' "
+                  "and created_at < now() - make_interval(hours => %s)", (hours,))
+
+
+def count_guest_docs():
+    with pool.connection() as c:
+        return c.execute("select count(*) as n from documents where left(namespace, 2) = 'g_'").fetchone()["n"]
 
 
 def count_processing():

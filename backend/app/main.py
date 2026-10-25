@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,16 @@ ORIGINS = [o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", "").split
 MAX_MB = int(os.getenv("MAX_UPLOAD_MB", "15"))
 MAX_DOCS = int(os.getenv("MAX_DOCS_PER_WORKSPACE", "25"))
 
+# Demo (guest) access: anyone can get a private, short-lived workspace without an access code.
+ALLOW_GUESTS = os.getenv("ALLOW_GUESTS", "off").lower() in ("on", "true", "1", "yes")
+GUEST_MAX_DOCS = int(os.getenv("GUEST_MAX_DOCS", "3"))
+GUEST_MAX_MB = int(os.getenv("GUEST_MAX_MB", "5"))
+GUEST_MAX_OCR_PAGES = int(os.getenv("GUEST_MAX_OCR_PAGES", "5"))
+GUEST_RETENTION_HOURS = int(os.getenv("GUEST_RETENTION_HOURS", "24"))
+GUEST_DAILY_CHATS = int(os.getenv("GUEST_DAILY_CHATS", "300"))   # protects the shared AI quota
+GUEST_TOTAL_DOCS = int(os.getenv("GUEST_TOTAL_DOCS", "60"))      # protects the free database
+GUEST_RE = re.compile(r"^guest-[a-f0-9]{32}$")
+
 SYSTEM = (
     "You answer questions using only the numbered sources provided. "
     "Cite every claim with its source number in square brackets, like [1] or [2][3]. "
@@ -35,12 +46,24 @@ SYSTEM = (
 executor = ThreadPoolExecutor(max_workers=1)  # one file at a time keeps memory flat
 
 
+async def purge_guests_forever():
+    """Deletes demo workspaces older than the retention period (also runs once at startup)."""
+    while True:
+        try:
+            await asyncio.to_thread(rag.purge_guests, GUEST_RETENTION_HOURS)
+        except Exception as e:
+            llm.log.warning("guest purge failed: %r", e)
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app):
     rag.init()  # loads the embedding model and opens the DB pool before serving
     rag.reset_stale()
     llm.init()
+    purge = asyncio.create_task(purge_guests_forever())
     yield
+    purge.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -58,8 +81,28 @@ def limit(ns, bucket, n, per):
     q.append(now)
 
 
+def is_guest(ns):
+    return ns.startswith("g_")
+
+
+_daily = {"day": "", "n": 0}
+
+
+def guest_daily_check():
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    if _daily["day"] != day:
+        _daily.update(day=day, n=0)
+    if _daily["n"] >= GUEST_DAILY_CHATS:
+        raise HTTPException(429, "The demo has reached its daily limit. Try again tomorrow, or request an access code.")
+    _daily["n"] += 1
+
+
 def auth(authorization: str = Header("")):
     code = authorization.removeprefix("Bearer ").strip()
+    if GUEST_RE.match(code):
+        if not ALLOW_GUESTS:
+            raise HTTPException(401, "Demo access is switched off. Please use an access code.")
+        return "g_" + hashlib.sha256(code.encode()).hexdigest()[:16]  # private to this browser
     if not any(hmac.compare_digest(code, c) for c in CODES):
         raise HTTPException(401, "Invalid access code.")
     return hashlib.sha256(code.encode()).hexdigest()[:16]  # each code gets its own private workspace
@@ -73,7 +116,7 @@ def sse(event, data):
 def health(deep: bool = False):
     if deep:
         rag.ping_db()  # also keeps the free Supabase project from pausing
-    return {"ok": True}
+    return {"ok": True, "guests": ALLOW_GUESTS}
 
 
 @app.get("/documents")
@@ -90,19 +133,24 @@ def delete(doc_id: str, ns=Depends(auth)):
 @app.post("/documents", status_code=202)
 async def upload(file: UploadFile = File(...), ns=Depends(auth)):
     """Accepts the file and returns at once. Reading, OCR and indexing happen in the background."""
-    limit(ns, "upload", 15, 3600)
+    guest = is_guest(ns)
+    limit(ns, "upload", 6 if guest else 15, 3600)
+    max_mb, max_docs = (GUEST_MAX_MB, GUEST_MAX_DOCS) if guest else (MAX_MB, MAX_DOCS)
     name = (file.filename or "file")[:200]
     if not rag.is_supported(name):
         raise HTTPException(415, "That file type isn't supported yet.")
     data = await file.read()
-    if len(data) > MAX_MB * 1_048_576:
-        raise HTTPException(413, f"Files must be smaller than {MAX_MB} MB.")
-    if await asyncio.to_thread(rag.count_docs, ns) >= MAX_DOCS:
-        raise HTTPException(409, f"Your workspace is full ({MAX_DOCS} files). Delete one to add another.")
+    if len(data) > max_mb * 1_048_576:
+        raise HTTPException(413, f"Files must be smaller than {max_mb} MB.")
+    if await asyncio.to_thread(rag.count_docs, ns) >= max_docs:
+        raise HTTPException(409, f"Your workspace is full ({max_docs} files). Delete one to add another.")
+    if guest and await asyncio.to_thread(rag.count_guest_docs) >= GUEST_TOTAL_DOCS:
+        raise HTTPException(503, "The demo is full right now. Try again later, or request an access code.")
     if await asyncio.to_thread(rag.count_processing) >= 3:
         raise HTTPException(429, "Still reading earlier files. Try again in a moment.")
     doc = await asyncio.to_thread(rag.create_doc, ns, name, file.content_type or "")
-    executor.submit(rag.process, ns, doc["id"], name, data, llm.describe_image)
+    executor.submit(rag.process, ns, doc["id"], name, data, llm.describe_image,
+                    GUEST_MAX_OCR_PAGES if guest else None)
     return doc
 
 
@@ -130,7 +178,10 @@ def rewrite(question, history):
 
 @app.post("/chat")
 async def chat(body: ChatIn, ns=Depends(auth)):
-    limit(ns, "chat", 20, 60)
+    guest = is_guest(ns)
+    limit(ns, "chat", 6 if guest else 20, 60)
+    if guest:
+        guest_daily_check()
     q = body.question.strip()[:2000]
     if not q:
         raise HTTPException(400, "Type a question first.")
