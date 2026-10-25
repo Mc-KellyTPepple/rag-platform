@@ -27,6 +27,9 @@ button,input,textarea{font:inherit;color:inherit}
 .gate p{color:var(--muted);margin:0 0 1.25rem}
 .gate input{width:100%;padding:.7rem .85rem;border:1px solid var(--line);border-radius:10px;margin-bottom:.9rem;background:#fff}
 .gate .btn{width:100%}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn.ghost:hover{background:#f4f6fb}
+.gate .or{text-align:center;color:var(--muted);font-size:.85rem;margin:.9rem 0}.gate .fine{font-size:.8rem;margin:.75rem 0 0}
+.demoNote{font-size:.82rem;color:var(--muted);background:#f4f6fb;border:1px solid var(--line);border-radius:10px;padding:.55rem .7rem;margin:0}
 .err{color:var(--bad);font-size:.9rem;margin:.75rem 0 0;min-height:1.2em}
 .shell{display:grid;grid-template-columns:320px 1fr;height:100%}
 .library{background:var(--card);border-right:1px solid var(--line);padding:1.25rem;display:flex;flex-direction:column;gap:1rem;overflow:auto}
@@ -95,6 +98,9 @@ mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 .1em}
     <p>Add documents, then ask questions. Every answer points to the passages it came from.</p>
     <input id="code" type="password" placeholder="Access code" autocomplete="current-password" required aria-label="Access code">
     <button class="btn" type="submit">Open workspace</button>
+    <p class="or" aria-hidden="true">or</p>
+    <button class="btn ghost" type="button" id="demoBtn">Try the demo</button>
+    <p class="fine">No code needed. Your demo workspace is private to this browser, holds up to 3 files of 5 MB, and is deleted after 24 hours. Please don't upload anything sensitive.</p>
     <p class="err" id="gateErr" role="alert"></p>
   </form>
 </section>
@@ -103,6 +109,7 @@ mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 .1em}
   <aside class="library">
     <div class="brand">Ask your files</div>
     <div class="engine" id="engine" data-state="warming" role="status"><span class="dot"></span><span id="engineText">Starting up…</span></div>
+    <p class="demoNote" id="demoNote" hidden>Demo workspace. Private to this browser, up to 3 files of 5 MB, deleted after 24 hours. Please don't upload sensitive documents.</p>
     <label class="drop" id="drop">
       <input type="file" id="file" multiple hidden accept=".pdf,.docx,.pptx,.xlsx,.xlsm,.csv,.tsv,.html,.htm,.txt,.md,.json,.xml,.png,.jpg,.jpeg,.gif,.webp">
       <strong>Add files</strong>
@@ -134,7 +141,7 @@ let code=sessionStorage.getItem("code")||"";
 let lastOk=+sessionStorage.getItem("lastOk")||0;
 let warming=null,docs=[],history=[],busy=false;
 
-/* ---------- keeping the server awake ---------- */
+/* ---------- waking the server on demand (nothing here pings in the background) ---------- */
 function engine(s){const e=$("#engine");e.dataset.state=s;
   $("#engineText").textContent={ready:"Ready",warming:"Starting up…",offline:"Can't reach the server"}[s]}
 async function ping(){try{return (await fetch(API+"/health",{cache:"no-store",signal:AbortSignal.timeout(10000)})).ok}catch{return false}}
@@ -147,22 +154,28 @@ function wake(){
   return warming}
 wake().catch(()=>{});                                   // start waking the moment the page opens
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake().catch(()=>{})});
-setInterval(()=>{if(!document.hidden)ping().then(ok=>ok&&touch())},4*60e3);   // stay warm while the tab is open
 
 async function api(path,opt={},retry=true){
   await wake();
   let r;
   try{r=await fetch(API+path,{...opt,headers:{...(opt.headers||{}),Authorization:"Bearer "+code}})}
   catch(e){if(!retry)throw new Error("Connection lost. Please try again.");lastOk=0;return api(path,opt,false)}
-  if(r.status===401){signOut("That access code wasn't recognised.");throw new Error("Invalid access code.")}
+  if(r.status===401){let m="That access code wasn't recognised.";try{m=(await r.json()).detail||m}catch{}
+    signOut(m);throw new Error(m)}
   if(!r.ok){let m="Something went wrong. Please try again.";try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
   touch();return r}
 
 /* ---------- gate ---------- */
-function show(){const ok=!!code;$("#gate").hidden=ok;$("#app").hidden=!ok;if(ok)loadDocs()}
+function show(){const ok=!!code;$("#gate").hidden=ok;$("#app").hidden=!ok;$("#demoNote").hidden=!code.startsWith("guest-");if(ok)loadDocs()}
 function signOut(msg=""){code="";sessionStorage.removeItem("code");docs=[];history=[];$("#gateErr").textContent=msg;show()}
 $("#gateForm").onsubmit=e=>{e.preventDefault();code=$("#code").value.trim();sessionStorage.setItem("code",code);$("#code").value="";$("#gateErr").textContent="";show()};
 $("#signout").onclick=()=>signOut();
+// Demo mode: a random private workspace id, kept in this browser so a return visit finds its files.
+const randHex=()=>[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,"0")).join("");
+$("#demoBtn").onclick=()=>{
+  let g="";try{g=localStorage.getItem("guestCode")||""}catch{}
+  if(!/^guest-[a-f0-9]{32}$/.test(g)){g="guest-"+randHex();try{localStorage.setItem("guestCode",g)}catch{}}
+  code=g;sessionStorage.setItem("code",code);$("#gateErr").textContent="";show()};
 
 /* ---------- files ---------- */
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
