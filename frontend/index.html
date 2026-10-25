@@ -94,13 +94,13 @@ mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 .1em}
 
 <section class="gate" id="gate" hidden>
   <form id="gateForm">
-    <h1>Ask your files</h1>
-    <p>Add documents, then ask questions. Every answer points to the passages it came from.</p>
+    <h1>Use an access code</h1>
+    <p>An access code opens a larger workspace that you keep for longer. Or go back to the demo, which needs no code.</p>
     <input id="code" type="password" placeholder="Access code" autocomplete="current-password" required aria-label="Access code">
     <button class="btn" type="submit">Open workspace</button>
     <p class="or" aria-hidden="true">or</p>
-    <button class="btn ghost" type="button" id="demoBtn">Try the demo</button>
-    <p class="fine">No code needed. Your demo workspace is private to this browser, holds up to 3 files of 5 MB, and is deleted after 24 hours. Please don't upload anything sensitive.</p>
+    <button class="btn ghost" type="button" id="demoBtn">Use the demo instead</button>
+    <p class="fine">The demo needs no code. Your demo workspace is private to this browser, holds up to 3 files of 5 MB, and is deleted after 24 hours. Please don't upload anything sensitive.</p>
     <p class="err" id="gateErr" role="alert"></p>
   </form>
 </section>
@@ -137,7 +137,13 @@ const API=(window.RAG_API_URL||"").replace(/\/$/,"");
 const $=s=>document.querySelector(s);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const FRESH=9*60e3;           // Render sleeps after ~15 min; treat the server as warm for 9
+const randHex=()=>[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,"0")).join("");
+// Demo workspace: a random private id kept in this browser, so a return visit finds its files.
+function guestCode(){let g="";try{g=localStorage.getItem("guestCode")||""}catch{}
+  if(!/^guest-[a-f0-9]{32}$/.test(g)){g="guest-"+randHex();try{localStorage.setItem("guestCode",g)}catch{}}return g}
 let code=sessionStorage.getItem("code")||"";
+// Nobody has to enter a code: visitors go straight into their demo workspace.
+if(!code&&!sessionStorage.getItem("noAuto")){code=guestCode();sessionStorage.setItem("code",code)}
 let lastOk=+sessionStorage.getItem("lastOk")||0;
 let warming=null,docs=[],history=[],busy=false;
 
@@ -152,8 +158,9 @@ function wake(){
     warming=(async()=>{for(let i=0;i<45;i++){if(await ping()){touch();return}await sleep(Math.min(1500+i*250,5000))}
       engine("offline");throw new Error("The server isn't responding. Please try again in a minute.")})().finally(()=>{warming=null})}
   return warming}
-wake().catch(()=>{});                                   // start waking the moment the page opens
-document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake().catch(()=>{})});
+// Only wake the server for a tab someone is looking at. A background tab stays quiet until it is shown.
+if(!document.hidden)wake().catch(()=>{});
+document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(code)loadDocs();else wake().catch(()=>{})});
 
 async function api(path,opt={},retry=true){
   await wake();
@@ -166,16 +173,11 @@ async function api(path,opt={},retry=true){
   touch();return r}
 
 /* ---------- gate ---------- */
-function show(){const ok=!!code;$("#gate").hidden=ok;$("#app").hidden=!ok;$("#demoNote").hidden=!code.startsWith("guest-");if(ok)loadDocs()}
-function signOut(msg=""){code="";sessionStorage.removeItem("code");docs=[];history=[];$("#gateErr").textContent=msg;show()}
+function show(){const ok=!!code;$("#gate").hidden=ok;$("#app").hidden=!ok;$("#demoNote").hidden=!code.startsWith("guest-");$("#signout").textContent=code.startsWith("guest-")?"Have an access code?":"Use the demo instead";if(ok&&!document.hidden)loadDocs()}
+function signOut(msg=""){code="";sessionStorage.removeItem("code");sessionStorage.setItem("noAuto","1");docs=[];history=[];$("#gateErr").textContent=msg;show()}
 $("#gateForm").onsubmit=e=>{e.preventDefault();code=$("#code").value.trim();sessionStorage.setItem("code",code);$("#code").value="";$("#gateErr").textContent="";show()};
-$("#signout").onclick=()=>signOut();
-// Demo mode: a random private workspace id, kept in this browser so a return visit finds its files.
-const randHex=()=>[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,"0")).join("");
-$("#demoBtn").onclick=()=>{
-  let g="";try{g=localStorage.getItem("guestCode")||""}catch{}
-  if(!/^guest-[a-f0-9]{32}$/.test(g)){g="guest-"+randHex();try{localStorage.setItem("guestCode",g)}catch{}}
-  code=g;sessionStorage.setItem("code",code);$("#gateErr").textContent="";show()};
+$("#signout").onclick=()=>{if(code.startsWith("guest-"))signOut();else{sessionStorage.removeItem("noAuto");sessionStorage.setItem("code",guestCode());location.reload()}};
+$("#demoBtn").onclick=()=>{sessionStorage.removeItem("noAuto");code=guestCode();sessionStorage.setItem("code",code);$("#gateErr").textContent="";show()};
 
 /* ---------- files ---------- */
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -194,7 +196,7 @@ async function refresh(){try{docs=await (await api("/documents")).json();renderD
 // Large or scanned files are read in the background; poll until nothing is still processing.
 function ensurePoll(){
   if(pollP||!docs.some(d=>d.status==="processing"))return pollP;
-  pollP=(async()=>{try{for(let i=0;i<500&&docs.some(d=>d.status==="processing");i++){await sleep(2500);await refresh()}}
+  pollP=(async()=>{try{for(let i=0;i<500&&docs.some(d=>d.status==="processing");){await sleep(2500);if(document.hidden)continue;i++;await refresh()}}
     finally{pollP=null}})();return pollP}
 async function loadDocs(){await refresh();ensurePoll()}
 async function upload(files){
