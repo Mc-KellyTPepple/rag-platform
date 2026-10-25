@@ -1,6 +1,6 @@
 # Ask your files: RAG on free tiers
 
-- **Frontend** (`frontend/`): static site on Vercel. It starts waking the backend the moment the page opens, keeps it awake while the tab is open, and shows a calm "Looking through your files" state if a question arrives while the server is still starting.
+- **Frontend** (`frontend/`): static site on Vercel. It starts waking the backend the moment the page opens (and again before a request if it has been idle), and shows a calm "Looking through your files" state while the server is still starting. Nothing pings the backend in the background, so it only wakes when someone uses it.
 - **Backend** (`backend/`): FastAPI in Docker on Render (free). Embeddings run on the server (ONNX, model baked into the image). Claude writes the answers.
 - **Database**: Supabase Postgres with pgvector, so nothing is lost when Render restarts.
 
@@ -16,8 +16,7 @@
    - `ACCESS_CODES`: one or more codes separated by commas. Each code opens its own private workspace.
    - `ALLOWED_ORIGINS`: your Vercel URL, for example `https://your-app.vercel.app`
 4. **Vercel**: import the repo, set **Root Directory** to `frontend`, framework **Other**. Before deploying, edit `frontend/config.js` with your Render URL.
-5. **Keep-alive** (recommended): in GitHub, Settings, Secrets and variables, Actions, Variables, add `RENDER_URL` (your Render URL). The workflow pings every 10 minutes between 06:00 and 21:00 UTC (edit the `cron` line for your timezone) and also touches the database, which stops Supabase pausing after a week idle. If you prefer, point cron-job.org or UptimeRobot at `https://YOUR-SERVICE.onrender.com/health?deep=1` every 10 minutes instead.
-6. Open your Vercel URL, enter an access code, add a file, ask a question.
+5. Open your Vercel URL, enter an access code, add a file, ask a question.
 
 ## How reranking and OCR fit in 512 MB
 
@@ -32,13 +31,31 @@ Switches (Render environment variables): `RERANK=off`, `OCR=off`, `OCR_LANG=eng+
 
 Set these Render environment variables: `LLM_PROVIDER=groq` and `GROQ_API_KEY` (from console.groq.com). Defaults are `openai/gpt-oss-120b` for answers and `openai/gpt-oss-20b` for rewriting follow-ups; override with `GEN_MODEL` and `FAST_MODEL`. Groq changes which models free accounts can use, and its Llama models are now listed as enterprise-only, so check console.groq.com/docs/models if you see "model not found". Groq's free tier has daily token limits, so a busy day can hit them. Reading **images** still needs `ANTHROPIC_API_KEY`. This changes who writes the answer only. It does not reduce the server's memory use. To do that, set `RERANK=off`.
 
+## Demo mode (no access code)
+
+Set `ALLOW_GUESTS=on` in Render. The sign-in page then offers **Try the demo**, which gives each browser its own private workspace (a random id kept in that browser). Guests are limited so a public demo can't use up the free tiers:
+
+| Variable | Default | What it limits |
+|---|---|---|
+| `GUEST_MAX_DOCS` | 3 | files per demo workspace |
+| `GUEST_MAX_MB` | 5 | size of each file |
+| `GUEST_MAX_OCR_PAGES` | 5 | scanned pages read per file |
+| `GUEST_RETENTION_HOURS` | 24 | demo workspaces older than this are deleted (checked hourly while the server is awake and at every start) |
+| `GUEST_TOTAL_DOCS` | 60 | demo files across all visitors (protects the 500 MB database) |
+| `GUEST_DAILY_CHATS` | 300 | demo questions per day across all visitors (protects the shared AI quota; resets on restart) |
+
+Guests also get 6 questions a minute and 6 uploads an hour. Access-code workspaces keep their own, higher limits. Set `ALLOW_GUESTS=off` to close the demo at any time.
+
+Visitors' files and questions are sent to the AI provider you configured (Groq or Anthropic). Tell visitors not to upload sensitive documents, as the demo screen does.
+
 ## Limits to know about
 
 - **OCR is slow on the free CPU.** Render free gives a fraction of a core. A page takes about 1.5 seconds on a normal laptop CPU and can take many times that here. Expect minutes for a long scan, and the 30-page cap keeps that bounded. Large scanned books are better OCR'd elsewhere first.
 - **Memory is my estimate, not a measurement.** If Render reports out-of-memory restarts, set `RERANK=off` first.
-- If the server restarts or sleeps during a scan, the file is marked failed and needs re-uploading. The pings and the open tab prevent most of this.
-- Render free allows 750 instance hours a month **for the whole workspace**, shared by every free web service. A service kept awake 24/7 uses about 744 of them, so other free services would be suspended until the month ends. That's why the keep-alive only runs in daytime hours. Outside that window the first visitor may see a cold start, which the frontend covers.
-- Scheduled pings can be delayed, so an occasional cold start can still happen. The frontend covers that by waking the server early and waiting gracefully, but a worst-case wait is still about a minute.
+- If the server restarts or sleeps during a scan, the file is marked failed and needs re-uploading. Keep the page open until the file finishes, because the page's progress checks keep the server awake while it works.
+- Render free allows 750 instance hours a month **for the whole workspace**, shared by every free web service. The backend wakes only when someone uses it and sleeps again after about 15 idle minutes, so hours are used only while it is in use.
+- The first visit after a quiet spell takes up to a minute to wake the server. The frontend starts the wake-up as soon as the page opens and waits gracefully.
+- Supabase's free plan **pauses a project after a week with no activity**. With no background pings, if nobody uses the app for a week, open the Supabase dashboard and click **Restore project** (it takes a few minutes).
 - Scanned PDFs have no text layer and are rejected (OCR isn't included). Photos of text work, because images are read by Claude.
 - Uploads are limited to 15 MB and 25 files per workspace (change `MAX_UPLOAD_MB` and `MAX_DOCS_PER_WORKSPACE`). The Supabase free database holds about 500 MB.
 - Access codes are shared secrets. They are fine for a personal tool or small team. For public sign-ups, swap in Supabase Auth.
