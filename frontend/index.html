@@ -133,7 +133,9 @@ mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 .1em}
 </div>
 
 <script>
-const API=(window.RAG_API_URL||"").replace(/\/$/,"");
+// Falls back to the live backend if config.js is missing or still holds the placeholder.
+const DEFAULT_API="https://rag-api-c6b1.onrender.com";
+const API=(window.RAG_API_URL&&!/YOUR-SERVICE/i.test(window.RAG_API_URL)?window.RAG_API_URL:DEFAULT_API).replace(/\/$/,"");
 const $=s=>document.querySelector(s);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const FRESH=9*60e3;           // Render sleeps after ~15 min; treat the server as warm for 9
